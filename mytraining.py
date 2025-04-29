@@ -1,6 +1,6 @@
 from ovseg.model.SegmentationModelV2 import SegmentationModelV2
 from ovseg.model.SegmentationEnsembleV2 import SegmentationEnsembleV2
-from ovseg.model.model_parameters_segmentation import get_model_params_3d_UNet
+from ovseg.model.model_parameters_segmentation import get_model_params_3d_UNet,get_model_params_3d_res_encoder_U_Net ,get_model_params_3d_from_preprocessed_folder
 
 # name of your raw dataset
 data_name = 'test'
@@ -12,7 +12,7 @@ model_name = 'testmodel'
 # Example 5-fold cross-vadliation: CV folds are 0,1,...,4.
 #                                  For each val_fold > 4 no CV is applied and 
 #                                  100% of the training data is used
-val_fold = 0
+val_fold = 5
 
 # now get hyper-parameters
 # patch size used during (last stage of) training and inference
@@ -24,7 +24,7 @@ n_2d_convs = 3
 # effect on the performance, but reduces training time by up to 40%
 use_prg_trn = True
 # number of different foreground classes you want to segment
-n_fg_classes = 2
+#n_fg_classes = 1
 # it is recommended to perform the training with mixed precision (fp16)
 # instead of full precision (fp32)
 use_fp32 = False
@@ -42,47 +42,94 @@ out_shape = [
 ]
 
 
-
-model_params = get_model_params_3d_UNet(patch_size=patch_size,
+"""
+model_params = get_model_params_3d_res_encoder_U_Net(patch_size=patch_size,
                                         n_2d_convs=n_2d_convs,
                                         use_prg_trn=use_prg_trn,
                                         n_fg_classes=n_fg_classes,
                                         fp32=use_fp32,
                                 
                                         out_shape=out_shape)
+"""
+model_params = get_model_params_3d_from_preprocessed_folder(data_name=data_name,preprocessed_name=preprocessed_name)
+print(model_params)
+model_params['architecture'] = "unetresencoder"
+params = model_params['network']
 
-model_params['data']['trn_dl_params']['batch_size'] = 4
-model_params['data']['val_dl_params']['batch_size'] = 4
-model_params['data']['trn_dl_params']['epoch_len'] = 1
-model_params['data']['val_dl_params']['epoch_len'] = 1
-model_params['data']['n_folds'] = 5
+# Supprimer les clés non supportées
+for key in ['kernel_sizes', 'kernel_sizes_up', 'n_pyramid_scales']:
+    params.pop(key, None)
 
-model_params['training']['opt_params'] = {
-    'momentum': 0.98,
-    'weight_decay': 0.0001,
-    'nesterov': True,
-    'lr': 0.02
+# Mettre à jour les bonnes clés
+params.update({
+    'in_channels': 1,
+    'out_channels': 3,
+    'is_2d': False,
+    'filters': 32,
+    'filters_max': 320,
+    'conv_params': None,
+    'norm': None,
+    'norm_params': None,
+    'nonlin_params': None,
+    'block': 'res',  # ou ResBlock si besoin
+    'z_to_xy_ratio': 6.25,
+    'stochdepth_rate': 0,
+    'n_blocks_list': [1, 2, 6, 3]
+})
+
+model_params["data"] = {
+    "n_folds": 0,
+    "fixed_shuffle": True,
+    "ds_params": {},
+    "trn_dl_params": {
+        "patch_size": [32, 216, 216],
+        "batch_size": 4,
+        "num_workers": 5,
+        "pin_memory": True,
+        "epoch_len": 250,
+        "p_bias_sampling": 0,
+        "min_biased_samples": 1,
+        "padded_patch_size": [32, 432, 432],
+        "store_coords_in_ram": True,
+        "memmap": "r",
+        "n_im_channels": 1,
+        "store_data_in_ram": False,
+        "return_fp16": True,
+        "n_max_volumes": None,
+    },
+    "val_dl_params": {
+        "patch_size": [32, 216, 216],
+        "batch_size": 4,
+        "num_workers": 0,
+        "pin_memory": True,
+        "epoch_len": 8,
+        "p_bias_sampling": 0,
+        "min_biased_samples": 1,
+        "padded_patch_size": [32, 432, 432],
+        "store_coords_in_ram": True,
+        "memmap": "r",
+        "n_im_channels": 1,
+        "store_data_in_ram": True,
+        "return_fp16": True,
+        "n_max_volumes": 16,
+    },
+    "keys": ["image", "label"],
+    "folders": ["images", "labels"]
 }
 
-model_params['training']['lr_params'] = {
-    'n_warmup_epochs': 50,
-    'lr_max': 0.02
+
+model_params["prediction"] = {
+    "patch_size": [32, 216, 216],
+    "batch_size": 1,
+    "overlap": 0.5,
+    "fp32": False,
+    "patch_weight_type": "gaussian",
+    "sigma_gaussian_weight": 0.125,
+    "mode": "simple",
 }
 
-model_params['training']['loss_params'] = {
-    'loss_names': ['cross_entropy', 'dice_loss']
-}
 
-model_params['training']['opt_name'] = 'SGD'
-model_params['training']['num_epochs'] = 1000
-model_params['training']['fp32'] = use_fp32
-model_params['training']['lr_schedule'] = 'lin_ascent_cos_decay'
-model_params['training']['prg_trn_sizes'] = [
-    [20, 256, 256],
-    [22, 304, 304],
-    [30, 384, 384],
-    [32, 432, 432]
-]
+
 
 # CHANGE YOUR HYPER-PARAMETERS HERE! For example
 
@@ -93,6 +140,9 @@ model_params['training']['prg_trn_sizes'] = [
 #model_params['training']['opt_params']['momentum'] = 0.98
 # change weight decay
 #model_params['training']['opt_params']['weight_decay'] = wd
+model_params['training']['prg_trn_sizes'] =  [[ 20 ,256, 256],[ 22, 304 ,304],[ 30 ,384, 384],[ 32 ,432, 432]]
+model_params['training']['prg_trn_resize_on_the_fly'] = False
+model_params['training']['num_epochs'] = 200
 
 # creat model object.
 # this object holds all objects that define a deep neural network model
@@ -105,12 +155,13 @@ model_params['training']['prg_trn_sizes'] = [
 #   - functions to iterate over datasets
 #   - I'm sure I forgot something
 
-model_params['preprocessed_path'] = "D:/programmation/myovseg/database/preprocessed/test/test_preprocessing"
+model_params['preprocessed_path'] = "/home/alexis/PINKCC/data/preprocessed/test/test_preprocessing"
 
 
 model = SegmentationModelV2(val_fold=val_fold,
                             data_name=data_name,
                             model_name=model_name,
+                    
                             preprocessed_name=preprocessed_name,
                             model_parameters=model_params)
 # execute the trainig, simple as that!
